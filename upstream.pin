@@ -1,0 +1,13 @@
+# Pinned upstream revision of home-assistant/operating-system.
+#
+# This is the exact commit of the upstream tree that the Taishan Pi build was
+# last verified against. The scheduled "sync" workflow compares the upstream
+# dev branch against this pin and opens a pull request when upstream moves.
+#
+# Format: <full 40-char sha> <iso-8601 date> <upstream version>
+#
+# Update this file through the "Update upstream pin" workflow or by hand
+# after a successful local build, then verify with:
+#   scripts/check-upstream.sh
+#
+7093f8afc25d5d110729c8e297c357087c063fb3 2026-10-30 upstream-dev

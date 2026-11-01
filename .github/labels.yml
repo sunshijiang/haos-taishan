@@ -1,0 +1,19 @@
+- name: "sync-failure"
+  color: "d93f0b"
+  description: "The automatic upstream sync failed and needs attention"
+
+- name: "build-failure"
+  color: "d93f0b"
+  description: "The HAOS build failed and needs attention"
+
+- name: "needs-triage"
+  color: "fbca04"
+  description: "Not yet reviewed"
+
+- name: "hardware"
+  color: "0e8a16"
+  description: "Relates to a specific hardware peripheral"
+
+- name: "upstream"
+  color: "5319e7"
+  description: "Relates to an upstream Home Assistant OS change"

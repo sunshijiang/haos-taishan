@@ -1,0 +1,177 @@
+# Build the Home Assistant Operating System image for the LCKFB Taishan Pi.
+#
+# The build happens in the upstream HAOS builder container, exactly like the
+# official home-assistant/operating-system CI does. The upstream tree is
+# fetched at the pinned revision (upstream.pin) and the Taishan Pi board
+# overlay from this repository is applied on top of it.
+#
+# Artifacts produced:
+#   haos_taishan-<version>.img.xz   raw disk image for SD card / eMMC
+#   haos_taishan-<version>.raucb    RAUC bundle for OTA / USB updates
+#
+name: Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish the image as a GitHub release'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - main
+    paths:
+      - 'board/**'
+      - 'configs/**'
+      - 'scripts/**'
+      - '.github/workflows/build.yml'
+  schedule:
+    # Weekly rebuild, so the image tracks upstream even when nothing changed
+    # in this repository. 03:17 UTC every Sunday.
+    - cron: '17 3 * * 0'
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  build:
+    name: Build HAOS for Taishan Pi
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Free space on the build drive
+        run: |
+          df -h
+          sudo rm -rf /usr/local/lib/android/sdk/ndk
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo mkdir -p /mnt/cache /mnt/output
+          sudo chown -R "$(stat -c '%U:%G' "${GITHUB_WORKSPACE}")" /mnt/cache /mnt/output
+          df -h
+
+      - name: Fetch upstream and apply the Taishan Pi overlay
+        run: |
+          chmod +x scripts/*.sh
+          PINNED="$(grep -oE '^[0-9a-f]{40}' upstream.pin | head -1)"
+          echo "Pinned upstream: ${PINNED}"
+          ./scripts/sync-upstream.sh --ref "${PINNED}" --dest "${GITHUB_WORKSPACE}/upstream"
+
+      - name: Build the builder container image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ./upstream
+          file: ./upstream/Dockerfile
+          tags: haos-taishan-builder:${{ github.sha }}
+          load: true
+
+      - name: Generate build config
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" \
+            -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}/upstream:/build" \
+            -v "/mnt/cache:/cache" \
+            -v "/mnt/output:/build/output" \
+            haos-taishan-builder:${{ github.sha }} \
+            make taishan_defconfig
+
+      - name: Build
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" \
+            -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}/upstream:/build" \
+            -v "/mnt/cache:/cache" \
+            -v "/mnt/output:/build/output" \
+            haos-taishan-builder:${{ github.sha }} \
+            make
+
+      - name: Verify the kernel configuration
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" \
+            -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}/upstream:/build" \
+            -v "/mnt/cache:/cache" \
+            -v "/mnt/output:/build/output" \
+            haos-taishan-builder:${{ github.sha }} \
+            bash -c 'make BR2_CHECK_DOTCONFIG_OPTS="--github-format --strip-path-prefix=/build/" linux-check-dotconfig'
+
+      - name: Inspect the produced image
+        run: |
+          ls -lh upstream/output/images/
+          echo "--- SHA256 ---"
+          (cd upstream/output/images/ && sha256sum haos_*)
+          echo "--- Partition table ---"
+          sudo sfdisk --dump upstream/output/images/haos_taishan-*.img 2>/dev/null || \
+            echo "(sfdisk unavailable, skipping partition dump)"
+
+      - name: Write the build summary
+        run: |
+          {
+            echo "# HAOS Taishan Pi build summary"
+            echo ""
+            echo "| File | Size |"
+            echo "|:-|:-|"
+            for f in upstream/output/images/haos_*; do
+              echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the disk image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          archive: false
+          name: haos_taishan.img.xz
+          path: upstream/output/images/haos_taishan-*.img.xz
+
+      - name: Upload the RAUC bundle
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          archive: false
+          name: haos_taishan.raucb
+          path: upstream/output/images/haos_taishan-*.raucb
+
+  publish:
+    name: Publish release
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the disk image
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: haos_taishan.img.xz
+
+      - name: Download the RAUC bundle
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: haos_taishan.raucb
+
+      - name: Create the release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          generate_release_notes: true
+          files: |
+            haos_taishan.img.xz
+            haos_taishan.raucb

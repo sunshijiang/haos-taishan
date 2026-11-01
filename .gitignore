@@ -1,0 +1,24 @@
+# Upstream checkout with the Taishan Pi overlay applied
+/upstream/
+
+# Build output
+/output/
+/.output/
+
+# Downloaded sources and ccache
+/.cache/
+
+# Local build artefacts
+*.img
+*.img.xz
+*.raucb
+*.qcow2
+*.vmdk
+*.zip
+boot.scr
+*.dtb
+
+# Editor and OS noise
+.DS_Store
+*.swp
+*~

@@ -1,0 +1,34 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshijiang <ssj1595329871@gmail.com>
+Date: Sat, 1 Nov 2026 22:00:00 +0800
+Subject: [PATCH] arm64: dts: rockchip: rk3566-lckfb-tspi: enable eMMC HS200
+
+The Taishan Pi eMMC must run in HS200 mode. On RK356x SoCs the MMC DDR52
+mode produces corrupt writes with some eMMC devices; only HS200 is
+reliable. This mirrors the change upstream Home Assistant made for the
+Home Assistant Green board, which runs the same RK3566 SoC:
+
+  green: emmc use HS200 mode
+    &sdhci { mmc-hs200-1_8v; }
+
+Without this the data partition can be silently corrupted while Home
+Assistant is writing its state, which is especially painful on the 1 GB
+variants where the eMMC is also small.
+
+Signed-off-by: sunshijiang <ssj1595329871@gmail.com>
+---
+ arch/arm64/boot/dts/rockchip/rk3566-lckfb-tspi.dts | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/arch/arm64/boot/dts/rockchip/rk3566-lckfb-tspi.dts b/arch/arm64/boot/dts/rockchip/rk3566-lckfb-tspi.dts
+index 4e0c4a1b2f3..7a1d9c5e6b8 100644
+--- a/arch/arm64/boot/dts/rockchip/rk3566-lckfb-tspi.dts
++++ b/arch/arm64/boot/dts/rockchip/rk3566-lckfb-tspi.dts
+@@ -570,6 +570,7 @@
+ &sdhci {
+ 	bus-width = <8>;
++	mmc-hs200-1_8v;
+ 	max-frequency = <200000000>;
+ 	non-removable;
+ 	pinctrl-names = "default";
+ 	pinctrl-0 = <&emmc_bus8 &emmc_clk &emmc_cmd &emmc_datastrobe &emmc_rstnout>;

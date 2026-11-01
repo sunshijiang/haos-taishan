@@ -1,0 +1,62 @@
+name: "Issue"
+description: "Report a problem with the Home Assistant OS build for the Taishan Pi"
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue. Please fill in the sections below.
+
+        If this is about a **build** failure, the workflow already opens an
+        issue labelled `build-failure` with the log excerpt. If this is about
+        a **failed upstream sync**, look for an issue labelled
+        `sync-failure`.
+
+  - type: input
+    id: version
+    attributes:
+      label: "Upstream commit"
+      description: "The commit in upstream.pin that the failing build used"
+      placeholder: "7093f8afc25d5d110729c8e297c357087c063fb3"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: "Category"
+      options:
+        - Build failure
+        - Boot failure
+        - Runtime problem
+        - Hardware peripheral
+        - Upstream sync
+        - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: hardware
+    attributes:
+      label: "Hardware"
+      description: "RAM size, eMMC size, and where the system is installed"
+      placeholder: "1 GB RAM, 16 GB eMMC, TF card"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "Description"
+      description: "What happened, and what you expected instead"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Logs"
+      description: >
+        Serial console output from power-on, and/or:
+        `ha os info`, `ha core info`, `ha supervisor info`, `dmesg | tail -50`
+      render: shell
