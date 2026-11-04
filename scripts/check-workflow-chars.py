@@ -57,12 +57,35 @@ def check_colons(path):
     return problems
 
 
+def check_secrets_in_if(path):
+    """The secrets context is not available in an `if` condition.
+
+    GitHub rejects a workflow that compares a secret directly in an `if`,
+    for example `if: ${{ secrets.NTFY_TOPIC != '' }}`. Expose the secret
+    through the job environment first and test `env.NAME` instead.
+    """
+    problems = []
+    with open(path, encoding="utf-8") as fh:
+        for number, line in enumerate(fh, 1):
+            stripped = line.strip()
+            if not stripped.startswith("if:"):
+                continue
+            if "secrets." not in stripped:
+                continue
+            problems.append(
+                f"{path}:{number}: the secrets context is not available in an "
+                f"if condition ({stripped[:60]})"
+            )
+    return problems
+
+
 def main():
     failures = []
     for path in sorted(glob.glob(".github/workflows/*.yml") +
                        glob.glob(".github/workflows/*.yaml")):
         failures.extend(check_non_ascii(path))
         failures.extend(check_colons(path))
+        failures.extend(check_secrets_in_if(path))
 
     if failures:
         print("Workflow files contain constructs that GitHub rejects:")
@@ -73,9 +96,10 @@ def main():
         print("  em dash (U+2014)          ->  -")
         print("  curly quotes              ->  ' or \"")
         print("  a colon in a name value   ->  drop it or quote the value")
+        print("  secrets in an if          ->  set an env variable and test env.NAME")
         return 1
 
-    print("All workflow files are ASCII only and free of colons in names.")
+    print("All workflow files pass the GitHub compatibility checks.")
     return 0
 
 

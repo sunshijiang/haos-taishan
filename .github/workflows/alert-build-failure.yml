@@ -27,6 +27,10 @@ jobs:
     name: Open an issue for the failed build
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-22.04
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Open or update the build failure issue
@@ -88,18 +92,18 @@ jobs:
             }
 
       - name: Send an out-of-band notification
-        if: ${{ secrets.NTFY_TOPIC != '' }}
+        if: env.NTFY_TOPIC != ''
         run: |
           curl -fsS -H "Title: HAOS Taishan build failed" \
                -H "Priority: high" \
                -H "Tags: warning" \
                -d "Build failed: ${{ github.event.workflow_run.html_url }}" \
-               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
+               "https://ntfy.sh/$NTFY_TOPIC"
 
       - name: Send a Telegram notification
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
         run: |
           curl -fsS -X POST \
-               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+               -d chat_id="$TELEGRAM_CHAT_ID" \
                -d text="HAOS Taishan build failed: ${{ github.event.workflow_run.html_url }}"

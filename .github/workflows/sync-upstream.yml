@@ -207,6 +207,10 @@ jobs:
     runs-on: ubuntu-22.04
     permissions:
       issues: write
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
 
     steps:
       - name: Open or update the failure issue
@@ -289,18 +293,18 @@ jobs:
             }
 
       - name: Send an out-of-band notification
-        if: ${{ secrets.NTFY_TOPIC != '' }}
+        if: env.NTFY_TOPIC != ''
         run: |
           curl -fsS -H "Title: HAOS Taishan upstream sync failed" \
                -H "Priority: high" \
                -H "Tags: warning" \
                -d "The upstream sync failed. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
-               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
+               "https://ntfy.sh/$NTFY_TOPIC"
 
       - name: Send a Telegram notification
-        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        if: env.TELEGRAM_BOT_TOKEN != '' && env.TELEGRAM_CHAT_ID != ''
         run: |
           curl -fsS -X POST \
-               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
-               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+               -d chat_id="$TELEGRAM_CHAT_ID" \
                -d text="HAOS Taishan upstream sync failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
