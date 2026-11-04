@@ -46,6 +46,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  check:
+    name: Check upstream for changes
+    runs-on: ubuntu-22.04
+    outputs:
+      update_available: ${{ steps.check.outputs.update_available }}
+      pinned_sha: ${{ steps.check.outputs.pinned_sha }}
+      latest_sha: ${{ steps.check.outputs.latest_sha }}
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check whether upstream moved
+        id: check
+        run: |
+          chmod +x scripts/*.sh
+          set -o pipefail
+          ./scripts/check-upstream.sh | tee /tmp/upstream-check.env
+          {
+            echo "update_available=$(grep '^UPSTREAM_UPDATE_AVAILABLE=' /tmp/upstream-check.env | cut -d= -f2)"
+            echo "pinned_sha=$(grep '^UPSTREAM_PINNED_SHA=' /tmp/upstream-check.env | cut -d= -f2)"
+            echo "latest_sha=$(grep '^UPSTREAM_LATEST_SHA=' /tmp/upstream-check.env | cut -d= -f2)"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "update_available=true" >> "$GITHUB_OUTPUT"
+          fi
+
   update:
     name: Open the upstream update PR
     needs: check
