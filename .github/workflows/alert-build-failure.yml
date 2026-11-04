@@ -21,3 +21,11 @@ jobs:
     steps:
       - name: Placeholder
         run: echo placeholder
+      - name: Send an out-of-band notification
+        if: ${{ secrets.NTFY_TOPIC != '' }}
+        run: |
+          curl -fsS -H "Title: HAOS Taishan build failed" \
+               -H "Priority: high" \
+               -H "Tags: warning" \
+               -d "Build failed: ${{ github.event.workflow_run.html_url }}" \
+               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
