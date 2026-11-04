@@ -72,6 +72,51 @@ else
     bad "eMMC HS200 is not enabled"
 fi
 
+# Verify that the patches apply against the upstream sources they target.
+# The kernel patch targets the stable tree, the U-Boot patch targets U-Boot
+# v2026.04.
+check_patches() {
+    local label="$1" url="$2" dir="$3" path="$4"
+    local patch="$5"
+
+    if ! command -v git >/dev/null 2>&1; then
+        info "git not available, skipping the ${label} patch check"
+        return 0
+    fi
+
+    local tmp
+    tmp="$(mktemp -d)"
+    if ! git clone --depth 1 --filter=blob:none --sparse --branch "${dir}" \
+            "${url}" "${tmp}/src" >/dev/null 2>&1; then
+        info "could not fetch ${label}, skipping the patch check"
+        rm -rf "${tmp}"
+        return 0
+    fi
+
+    ( cd "${tmp}/src" && git sparse-checkout set "${path}" >/dev/null 2>&1 )
+
+    if ( cd "${tmp}/src" && git apply --check "${patch}" >/dev/null 2>&1 ); then
+        ok "${label} patch applies cleanly"
+    else
+        bad "${label} patch does not apply"
+    fi
+    rm -rf "${tmp}"
+}
+
+if [ "${SKIP_PATCH_CHECK:-0}" != "1" ]; then
+    echo
+    echo "== 1b. Patch applicability =="
+    KVER="$(grep 'BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE' \
+        "${REPO_ROOT}/configs/taishan_defconfig" | cut -d '"' -f 2)"
+    check_patches "kernel ${KVER}" "https://github.com/gregkh/linux.git" \
+        "v${KVER}" "arch/arm64/boot/dts/rockchip" \
+        "${REPO_ROOT}/board/taishan/patches/linux/0001-arm64-dts-rockchip-rk3566-lckfb-tspi-enable-eMMC-HS200.patch"
+
+    check_patches "U-Boot" "https://github.com/u-boot/u-boot.git" \
+        "v2026.04" "configs" \
+        "${REPO_ROOT}/board/taishan/patches/uboot/0001-configs-lckfb-tspi-rk3566-enable-HAOS-required-options.patch"
+fi
+
 if [ "${CONFIG_ONLY}" -eq 1 ]; then
     echo
     echo "Passed: ${PASS}, Failed: ${FAIL}"

@@ -128,26 +128,27 @@ jobs:
 
           # The kernel is not part of the upstream tree: Buildroot downloads
           # the kernel tarball at build time and applies BR2_GLOBAL_PATCH_DIR
-          # to it. So verify the kernel patch against the actual tarball
+          # to it. So verify the kernel patch against the actual kernel source
           # that the defconfig pins.
           #
-          # The HAOS kernel versions come from the stable tree, so the
-          # snapshot endpoint of git.kernel.org/stable is used rather than
-          # cdn.kernel.org (which only carries the released tarballs).
+          # The HAOS kernel versions come from the stable tree. The snapshot
+          # generator on git.kernel.org is frequently overloaded (it returns
+          # 502 while it builds the tarball on demand), so the GitHub mirror
+          # of the stable tree is used instead.
           KVER="$(grep 'BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE' \
             /tmp/upstream-overlay/buildroot-external/configs/taishan_defconfig \
             | cut -d '"' -f 2)"
           echo "Kernel version: ${KVER}"
 
-          echo "Downloading the kernel snapshot for linux-${KVER}"
-          curl -fsSL --retry 3 -o /tmp/linux.tar.gz \
-            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-${KVER}.tar.gz"
-
-          rm -rf /tmp/linux-src && mkdir -p /tmp/linux-src
-          tar -xzf /tmp/linux.tar.gz -C /tmp/linux-src --strip-components=1
+          echo "Downloading the kernel source for linux-${KVER}"
+          rm -rf /tmp/linux-src
+          git clone --depth 1 --filter=blob:none --sparse \
+            --branch "v${KVER}" \
+            https://github.com/gregkh/linux.git /tmp/linux-src
+          cd /tmp/linux-src
+          git sparse-checkout set arch/arm64/boot/dts/rockchip
 
           echo "Checking that the kernel patch applies to linux-${KVER}"
-          cd /tmp/linux-src
           git apply --check \
             "${GITHUB_WORKSPACE}/board/taishan/patches/linux/0001-arm64-dts-rockchip-rk3566-lckfb-tspi-enable-eMMC-HS200.patch" \
             || {
