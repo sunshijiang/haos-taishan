@@ -110,7 +110,15 @@ cd haos-taishan
 ./scripts/build.sh
 ```
 
-The build takes roughly 40–90 minutes on a GitHub-hosted runner.
+The build takes roughly 40-90 minutes on a GitHub-hosted runner. The
+compiler cache is stored between runs, so only the first build pays the full
+price.
+
+The Build workflow also runs `scripts/check-workflow-chars.py` before
+anything else. GitHub rejects a workflow file that contains an em dash, a
+colon in a name value, or the secrets context in an `if` condition, and it
+does so silently: the workflow keeps an entry but never runs. The check
+turns that into an immediate, readable failure.
 
 ### What the build does
 
