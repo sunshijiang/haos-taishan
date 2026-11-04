@@ -56,6 +56,12 @@ Common substitutions:
 | ellipsis | U+2026 | `...` |
 | non-breaking space | U+00A0 | a space |
 
+A second trap: a workflow that was committed through the GitHub REST API
+(the contents endpoint) keeps its entry but its name stays the file path.
+GitHub indexes workflows when the push event arrives, not when the blob
+changes. The same file committed with `git push` is parsed correctly.
+When diagnosing this, compare against a `git push` of the same content.
+
 **How to diagnose it yourself** when a workflow stops working:
 
 ```bash
