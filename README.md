@@ -258,6 +258,18 @@ To enable push notifications, add the secrets under
 | `TELEGRAM_BOT_TOKEN` | Bot token for Telegram |
 | `TELEGRAM_CHAT_ID` | Chat ID to message |
 
+The notification steps read the secrets from the job environment, because a
+secret cannot be used directly in an `if` condition:
+
+```yaml
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+    steps:
+      - name: Send an out-of-band notification
+        if: env.NTFY_TOPIC != ''
+```
+
 ### Rollback
 
 ```bash
