@@ -35,7 +35,10 @@ on:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Do not cancel a running build. A full build takes over an hour, and
+  # cancelling it on every push would mean the build never finishes while
+  # the repository is being worked on.
+  cancel-in-progress: false
 
 env:
   PYTHON_VERSION: '3.13'
