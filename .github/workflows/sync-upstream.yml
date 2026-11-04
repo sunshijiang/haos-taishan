@@ -1,5 +1,9 @@
 # Keep this repository in sync with home-assistant/operating-system.
 #
+# Note: commit this file with git, not through the REST API. GitHub only
+# parses a workflow when the push event arrives, so a file written through
+# the API keeps its entry but never runs.
+#
 # How it works
 # ------------
 # 1. Every day the workflow compares the upstream `dev` branch against the

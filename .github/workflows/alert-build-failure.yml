@@ -1,5 +1,9 @@
 # Raise a visible alert when a build fails.
 #
+# Note: commit this file with git, not through the REST API. GitHub only
+# parses a workflow when the push event arrives, so a file written through
+# the API keeps its entry but never runs.
+#
 # The Build workflow only uploads artifacts on success, so a failure is easy
 # to miss in a long-running repository. This workflow turns a failed build
 # into a tracked GitHub issue plus an optional push notification.
