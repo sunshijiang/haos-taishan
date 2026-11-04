@@ -22,3 +22,6 @@ boot.scr
 .DS_Store
 *.swp
 *~
+
+# Temporary diagnostic files
+/.tmp/
