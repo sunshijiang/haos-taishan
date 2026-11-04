@@ -76,8 +76,7 @@ jobs:
         with:
           path: /mnt/cache/cc
           key: haos-cc-taishan-${{ github.run_id }}
-          restore-keys: |
-            haos-cc-taishan-
+          restore-keys: haos-cc-taishan-
 
       - name: Fetch upstream and apply the Taishan Pi overlay
         run: |
@@ -120,7 +119,6 @@ jobs:
             make BR2_JLEVEL=4
 
       - name: Save cache: object files
-        if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /mnt/cache/cc
