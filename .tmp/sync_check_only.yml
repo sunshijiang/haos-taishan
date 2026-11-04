@@ -1,0 +1,77 @@
+# Keep this repository in sync with home-assistant/operating-system.
+#
+# How it works
+# ------------
+# 1. Every day the workflow compares the upstream `dev` branch against the
+#    commit pinned in `upstream.pin`.
+# 2. If upstream moved, it opens (or updates) a pull request that bumps the
+#    pin and triggers a rebuild. The PR is the place where a human reviews
+#    whether the Taishan Pi patches still apply and whether the board config
+#    needs adjusting for the new upstream release.
+# 3. If the automatic patch application fails, the workflow fails loudly and
+#    opens an issue that describes exactly what broke, so the failure is not
+#    silently ignored.
+#
+# Alerting
+# --------
+# On failure the workflow:
+#   * fails the job (visible in the Actions tab and in the repository status),
+#   * opens or updates a GitHub issue titled
+#     "Upstream sync failed" with the failing step and the log excerpt,
+#   * sends a notification through the "notify" job, which uses GitHub
+#     notifications (watch/subscribers) and, when configured, an ntfy or
+#     Telegram webhook stored as a repository secret.
+#
+name: Sync upstream
+
+on:
+  schedule:
+    # Daily at 04:23 UTC.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open a PR even if upstream has not moved'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check upstream for changes
+    runs-on: ubuntu-22.04
+    outputs:
+      update_available: ${{ steps.check.outputs.update_available }}
+      pinned_sha: ${{ steps.check.outputs.pinned_sha }}
+      latest_sha: ${{ steps.check.outputs.latest_sha }}
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check whether upstream moved
+        id: check
+        run: |
+          chmod +x scripts/*.sh
+          set -o pipefail
+          ./scripts/check-upstream.sh | tee /tmp/upstream-check.env
+          {
+            echo "update_available=$(grep '^UPSTREAM_UPDATE_AVAILABLE=' /tmp/upstream-check.env | cut -d= -f2)"
+            echo "pinned_sha=$(grep '^UPSTREAM_PINNED_SHA=' /tmp/upstream-check.env | cut -d= -f2)"
+            echo "latest_sha=$(grep '^UPSTREAM_LATEST_SHA=' /tmp/upstream-check.env | cut -d= -f2)"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "${{ inputs.force }}" = "true" ]; then
+            echo "update_available=true" >> "$GITHUB_OUTPUT"
+          fi

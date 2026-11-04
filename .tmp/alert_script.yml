@@ -1,0 +1,39 @@
+name: Alert on build failure
+
+on:
+  workflow_run:
+    workflows:
+      - Build
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  alert:
+    name: Open an issue for the failed build
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Placeholder
+        run: echo placeholder
+      - name: Open or update the build failure issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+
+            const body = `## HAOS Taishan build failed
+
+            | | |
+            |:-|:-|
+            | Workflow | \`${run.name}\` |
+            | Run | ${run.html_url} |
+            `;
+
+            const title = 'HAOS Taishan build failed';
+            core.info(title);

@@ -1,0 +1,152 @@
+# Keep this repository in sync with home-assistant/operating-system.
+#
+# How it works
+# ------------
+# 1. Every day the workflow compares the upstream `dev` branch against the
+#    commit pinned in `upstream.pin`.
+# 2. If upstream moved, it opens (or updates) a pull request that bumps the
+#    pin and triggers a rebuild. The PR is the place where a human reviews
+#    whether the Taishan Pi patches still apply and whether the board config
+#    needs adjusting for the new upstream release.
+# 3. If the automatic patch application fails, the workflow fails loudly and
+#    opens an issue that describes exactly what broke, so the failure is not
+#    silently ignored.
+#
+# Alerting
+# --------
+# On failure the workflow:
+#   * fails the job (visible in the Actions tab and in the repository status),
+#   * opens or updates a GitHub issue titled
+#     "Upstream sync failed" with the failing step and the log excerpt,
+#   * sends a notification through the "notify" job, which uses GitHub
+#     notifications (watch/subscribers) and, when configured, an ntfy or
+#     Telegram webhook stored as a repository secret.
+#
+name: Sync upstream
+
+on:
+  schedule:
+    # Daily at 04:23 UTC.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open a PR even if upstream has not moved'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    name: Notify
+    needs: [check, update]
+    if: failure()
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+
+    steps:
+      - name: Open or update the failure issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+
+            let body = `## Upstream sync failed
+
+            The scheduled upstream sync could not complete.
+
+            | | |
+            |:-|:-|
+            | Pinned upstream | \`${{ needs.check.outputs.pinned_sha || 'unknown' }}\` |
+            | Latest upstream | \`${{ needs.check.outputs.latest_sha || 'unknown' }}\` |
+            | Workflow run | ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId} |
+
+            ### Failing job
+
+            \`${{ job.name || 'unknown' }}\`
+
+            ### What to do
+
+            1. Open the failed workflow run above and read the log.
+            2. If the Taishan Pi patches no longer apply, refresh them against
+               the new upstream tree:
+
+               ```bash
+               ./scripts/sync-upstream.sh --ref <new-sha> --dest /tmp/up
+               cd /tmp/up/buildroot
+               git apply --check \
+                 ${GITHUB_WORKSPACE}/board/taishan/patches/linux/*.patch
+               ```
+
+            3. Fix the patches, then run the workflow again.
+            `;
+
+            // Collect a log excerpt when the run has a failed job.
+            try {
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+              });
+              const failed = jobs.data.jobs.find((j) => j.conclusion === 'failure');
+              if (failed) {
+                body += `\n### Failed job: ${failed.name}\n\n\`\`\`\n${failed.name} (${failed.conclusion})\n\`\`\`\n`;
+              }
+            } catch (err) {
+              body += `\n_(could not retrieve job details: ${err.message})_\n`;
+            }
+
+            const title = 'Upstream sync failed';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'sync-failure',
+            });
+
+            if (existing.data.length > 0) {
+              const issue = existing.data[0];
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+              core.info(`Updated issue #${issue.number}`);
+            } else {
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['sync-failure'],
+              });
+              core.info(`Created issue #${issue.number}`);
+            }
+
+      - name: Send an out-of-band notification
+        if: ${{ secrets.NTFY_TOPIC != '' }}
+        run: |
+          curl -fsS -H "Title: HAOS Taishan upstream sync failed" \
+               -H "Priority: high" \
+               -H "Tags: warning" \
+               -d "The upstream sync failed. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
+
+      - name: Send a Telegram notification
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        run: |
+          curl -fsS -X POST \
+               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               -d text="HAOS Taishan upstream sync failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

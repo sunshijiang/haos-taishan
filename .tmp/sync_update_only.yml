@@ -1,0 +1,167 @@
+# Keep this repository in sync with home-assistant/operating-system.
+#
+# How it works
+# ------------
+# 1. Every day the workflow compares the upstream `dev` branch against the
+#    commit pinned in `upstream.pin`.
+# 2. If upstream moved, it opens (or updates) a pull request that bumps the
+#    pin and triggers a rebuild. The PR is the place where a human reviews
+#    whether the Taishan Pi patches still apply and whether the board config
+#    needs adjusting for the new upstream release.
+# 3. If the automatic patch application fails, the workflow fails loudly and
+#    opens an issue that describes exactly what broke, so the failure is not
+#    silently ignored.
+#
+# Alerting
+# --------
+# On failure the workflow:
+#   * fails the job (visible in the Actions tab and in the repository status),
+#   * opens or updates a GitHub issue titled
+#     "Upstream sync failed" with the failing step and the log excerpt,
+#   * sends a notification through the "notify" job, which uses GitHub
+#     notifications (watch/subscribers) and, when configured, an ntfy or
+#     Telegram webhook stored as a repository secret.
+#
+name: Sync upstream
+
+on:
+  schedule:
+    # Daily at 04:23 UTC.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open a PR even if upstream has not moved'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Open the upstream update PR
+    needs: check
+    if: needs.check.outputs.update_available == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Update the pin
+        run: |
+          LATEST="${{ needs.check.outputs.latest_sha }}"
+          PINNED="${{ needs.check.outputs.pinned_sha }}"
+          DATE="$(date --utc +'%Y-%m-%d')"
+          {
+            echo "# Pinned upstream revision of home-assistant/operating-system."
+            echo "#"
+            echo "# This is the exact commit of the upstream tree that the Taishan Pi build was"
+            echo "# last verified against. The scheduled \"sync\" workflow compares the upstream"
+            echo "# dev branch against this pin and opens a pull request when upstream moves."
+            echo "#"
+            echo "# Format: <full 40-char sha> <iso-8601 date> <upstream version>"
+            echo "#"
+            echo "# Update this file through the \"Update upstream pin\" workflow or by hand"
+            echo "# after a successful local build, then verify with:"
+            echo "#   scripts/check-upstream.sh"
+            echo "#"
+            echo "${LATEST} ${DATE} upstream-dev"
+          } > upstream.pin
+          git diff -- upstream.pin
+
+      - name: Verify that the board patches still apply
+        run: |
+          # Fetch the new upstream tree and try to apply the Taishan Pi
+          # patches on top of it. If this fails, the job fails and the
+          # "notify" job raises an issue with the details.
+          echo "Fetching upstream ${{ needs.check.outputs.latest_sha }}"
+          ./scripts/sync-upstream.sh \
+            --ref "${{ needs.check.outputs.latest_sha }}" \
+            --dest /tmp/upstream-overlay
+
+          # The kernel is not part of the upstream tree: Buildroot downloads
+          # the kernel tarball at build time and applies BR2_GLOBAL_PATCH_DIR
+          # to it. So verify the kernel patch against the actual kernel source
+          # that the defconfig pins.
+          #
+          # The HAOS kernel versions come from the stable tree. The snapshot
+          # generator on git.kernel.org is frequently overloaded (it returns
+          # 502 while it builds the tarball on demand), so the GitHub mirror
+          # of the stable tree is used instead.
+          KVER="$(grep 'BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE' \
+            /tmp/upstream-overlay/buildroot-external/configs/taishan_defconfig \
+            | cut -d '"' -f 2)"
+          echo "Kernel version: ${KVER}"
+
+          echo "Downloading the kernel source for linux-${KVER}"
+          rm -rf /tmp/linux-src
+          git clone --depth 1 --filter=blob:none --sparse \
+            --branch "v${KVER}" \
+            https://github.com/gregkh/linux.git /tmp/linux-src
+          cd /tmp/linux-src
+          git sparse-checkout set arch/arm64/boot/dts/rockchip
+
+          echo "Checking that the kernel patch applies to linux-${KVER}"
+          git apply --check \
+            "${GITHUB_WORKSPACE}/board/taishan/patches/linux/0001-arm64-dts-rockchip-rk3566-lckfb-tspi-enable-eMMC-HS200.patch" \
+            || {
+              echo "::error::The Taishan Pi kernel patch does not apply to linux-${KVER}."
+              exit 1
+            }
+          echo "Kernel patch applies cleanly."
+
+          echo "Checking that the U-Boot patch applies to U-Boot v2026.04"
+          git clone --depth 1 --branch v2026.04 \
+            https://github.com/u-boot/u-boot.git /tmp/uboot
+          cd /tmp/uboot
+          git apply --check \
+            "${GITHUB_WORKSPACE}/board/taishan/patches/uboot/0001-configs-lckfb-tspi-rk3566-enable-HAOS-required-options.patch" \
+            || {
+              echo "::error::The Taishan Pi U-Boot patch does not apply to U-Boot v2026.04."
+              exit 1
+            }
+          echo "U-Boot patch applies cleanly."
+
+      - name: Create or update the pull request
+        uses: peter-evans/create-pull-request@v7 # v7.0.9
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/update-upstream
+          base: main
+          delete-branch: true
+          commit-message: 'Update upstream pin to ${{ needs.check.outputs.latest_sha }}'
+          title: 'Update upstream to ${{ needs.check.outputs.latest_sha }}'
+          body: |
+            Automated upstream sync.
+
+            | | |
+            |:-|:-|
+            | Previous pin | `${{ needs.check.outputs.pinned_sha }}` |
+            | New upstream | `${{ needs.check.outputs.latest_sha }}` |
+
+            The Taishan Pi board patches were verified to apply cleanly against
+            the new upstream tree.
+
+            Merging this PR will:
+            1. re-pin the upstream revision,
+            2. trigger the `Build` workflow, which produces a fresh
+               `haos_taishan-*.img.xz` and `haos_taishan-*.raucb`.
+
+            Please check the build result before deploying the image to a device.

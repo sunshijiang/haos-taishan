@@ -1,0 +1,272 @@
+# Keep this repository in sync with home-assistant/operating-system.
+#
+# How it works
+# ------------
+# 1. Every day the workflow compares the upstream `dev` branch against the
+#    commit pinned in `upstream.pin`.
+# 2. If upstream moved, it opens (or updates) a pull request that bumps the
+#    pin and triggers a rebuild. The PR is the place where a human reviews
+#    whether the Taishan Pi patches still apply and whether the board config
+#    needs adjusting for the new upstream release.
+# 3. If the automatic patch application fails, the workflow fails loudly and
+#    opens an issue that describes exactly what broke, so the failure is not
+#    silently ignored.
+#
+# Alerting
+# --------
+# On failure the workflow:
+#   * fails the job (visible in the Actions tab and in the repository status),
+#   * opens or updates a GitHub issue titled
+#     "Upstream sync failed" with the failing step and the log excerpt,
+#   * sends a notification through the "notify" job, which uses GitHub
+#     notifications (watch/subscribers) and, when configured, an ntfy or
+#     Telegram webhook stored as a repository secret.
+#
+name: Sync upstream
+
+on:
+  schedule:
+    # Daily at 04:23 UTC.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Open a PR even if upstream has not moved'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Open the upstream update PR
+    needs: check
+    if: needs.check.outputs.update_available == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout this repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Configure git
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+      - name: Update the pin
+        run: |
+          LATEST="${{ needs.check.outputs.latest_sha }}"
+          PINNED="${{ needs.check.outputs.pinned_sha }}"
+          DATE="$(date --utc +'%Y-%m-%d')"
+          {
+            echo "# Pinned upstream revision of home-assistant/operating-system."
+            echo "#"
+            echo "# This is the exact commit of the upstream tree that the Taishan Pi build was"
+            echo "# last verified against. The scheduled \"sync\" workflow compares the upstream"
+            echo "# dev branch against this pin and opens a pull request when upstream moves."
+            echo "#"
+            echo "# Format: <full 40-char sha> <iso-8601 date> <upstream version>"
+            echo "#"
+            echo "# Update this file through the \"Update upstream pin\" workflow or by hand"
+            echo "# after a successful local build, then verify with:"
+            echo "#   scripts/check-upstream.sh"
+            echo "#"
+            echo "${LATEST} ${DATE} upstream-dev"
+          } > upstream.pin
+          git diff -- upstream.pin
+
+      - name: Verify that the board patches still apply
+        run: |
+          # Fetch the new upstream tree and try to apply the Taishan Pi
+          # patches on top of it. If this fails, the job fails and the
+          # "notify" job raises an issue with the details.
+          echo "Fetching upstream ${{ needs.check.outputs.latest_sha }}"
+          ./scripts/sync-upstream.sh \
+            --ref "${{ needs.check.outputs.latest_sha }}" \
+            --dest /tmp/upstream-overlay
+
+          # The kernel is not part of the upstream tree: Buildroot downloads
+          # the kernel tarball at build time and applies BR2_GLOBAL_PATCH_DIR
+          # to it. So verify the kernel patch against the actual kernel source
+          # that the defconfig pins.
+          #
+          # The HAOS kernel versions come from the stable tree. The snapshot
+          # generator on git.kernel.org is frequently overloaded (it returns
+          # 502 while it builds the tarball on demand), so the GitHub mirror
+          # of the stable tree is used instead.
+          KVER="$(grep 'BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE' \
+            /tmp/upstream-overlay/buildroot-external/configs/taishan_defconfig \
+            | cut -d '"' -f 2)"
+          echo "Kernel version: ${KVER}"
+
+          echo "Downloading the kernel source for linux-${KVER}"
+          rm -rf /tmp/linux-src
+          git clone --depth 1 --filter=blob:none --sparse \
+            --branch "v${KVER}" \
+            https://github.com/gregkh/linux.git /tmp/linux-src
+          cd /tmp/linux-src
+          git sparse-checkout set arch/arm64/boot/dts/rockchip
+
+          echo "Checking that the kernel patch applies to linux-${KVER}"
+          git apply --check \
+            "${GITHUB_WORKSPACE}/board/taishan/patches/linux/0001-arm64-dts-rockchip-rk3566-lckfb-tspi-enable-eMMC-HS200.patch" \
+            || {
+              echo "::error::The Taishan Pi kernel patch does not apply to linux-${KVER}."
+              exit 1
+            }
+          echo "Kernel patch applies cleanly."
+
+          echo "Checking that the U-Boot patch applies to U-Boot v2026.04"
+          git clone --depth 1 --branch v2026.04 \
+            https://github.com/u-boot/u-boot.git /tmp/uboot
+          cd /tmp/uboot
+          git apply --check \
+            "${GITHUB_WORKSPACE}/board/taishan/patches/uboot/0001-configs-lckfb-tspi-rk3566-enable-HAOS-required-options.patch" \
+            || {
+              echo "::error::The Taishan Pi U-Boot patch does not apply to U-Boot v2026.04."
+              exit 1
+            }
+          echo "U-Boot patch applies cleanly."
+
+      - name: Create or update the pull request
+        uses: peter-evans/create-pull-request@v7 # v7.0.9
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: automation/update-upstream
+          base: main
+          delete-branch: true
+          commit-message: 'Update upstream pin to ${{ needs.check.outputs.latest_sha }}'
+          title: 'Update upstream to ${{ needs.check.outputs.latest_sha }}'
+          body: |
+            Automated upstream sync.
+
+            | | |
+            |:-|:-|
+            | Previous pin | `${{ needs.check.outputs.pinned_sha }}` |
+            | New upstream | `${{ needs.check.outputs.latest_sha }}` |
+
+            The Taishan Pi board patches were verified to apply cleanly against
+            the new upstream tree.
+
+            Merging this PR will:
+            1. re-pin the upstream revision,
+            2. trigger the `Build` workflow, which produces a fresh
+               `haos_taishan-*.img.xz` and `haos_taishan-*.raucb`.
+
+            Please check the build result before deploying the image to a device.
+
+  notify:
+    name: Notify
+    needs: [check, update]
+    if: failure()
+    runs-on: ubuntu-22.04
+    permissions:
+      issues: write
+
+    steps:
+      - name: Open or update the failure issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+
+            let body = `## Upstream sync failed
+
+            The scheduled upstream sync could not complete.
+
+            | | |
+            |:-|:-|
+            | Pinned upstream | \`${{ needs.check.outputs.pinned_sha || 'unknown' }}\` |
+            | Latest upstream | \`${{ needs.check.outputs.latest_sha || 'unknown' }}\` |
+            | Workflow run | ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId} |
+
+            ### Failing job
+
+            \`${{ job.name || 'unknown' }}\`
+
+            ### What to do
+
+            1. Open the failed workflow run above and read the log.
+            2. If the Taishan Pi patches no longer apply, refresh them against
+               the new upstream tree:
+
+               ```bash
+               ./scripts/sync-upstream.sh --ref <new-sha> --dest /tmp/up
+               cd /tmp/up/buildroot
+               git apply --check \
+                 ${GITHUB_WORKSPACE}/board/taishan/patches/linux/*.patch
+               ```
+
+            3. Fix the patches, then run the workflow again.
+            `;
+
+            // Collect a log excerpt when the run has a failed job.
+            try {
+              const jobs = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+              });
+              const failed = jobs.data.jobs.find((j) => j.conclusion === 'failure');
+              if (failed) {
+                body += `\n### Failed job: ${failed.name}\n\n\`\`\`\n${failed.name} (${failed.conclusion})\n\`\`\`\n`;
+              }
+            } catch (err) {
+              body += `\n_(could not retrieve job details: ${err.message})_\n`;
+            }
+
+            const title = 'Upstream sync failed';
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'sync-failure',
+            });
+
+            if (existing.data.length > 0) {
+              const issue = existing.data[0];
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body,
+              });
+              core.info(`Updated issue #${issue.number}`);
+            } else {
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['sync-failure'],
+              });
+              core.info(`Created issue #${issue.number}`);
+            }
+
+      - name: Send an out-of-band notification
+        if: ${{ secrets.NTFY_TOPIC != '' }}
+        run: |
+          curl -fsS -H "Title: HAOS Taishan upstream sync failed" \
+               -H "Priority: high" \
+               -H "Tags: warning" \
+               -d "The upstream sync failed. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
+
+      - name: Send a Telegram notification
+        if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
+        run: |
+          curl -fsS -X POST \
+               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               -d text="HAOS Taishan upstream sync failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
