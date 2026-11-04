@@ -4,6 +4,81 @@ Symptoms, causes and fixes. Ordered roughly by how often they occur.
 
 ---
 
+## Workflow problems
+
+### The workflow does not run at all, and the API shows the file path as its name
+
+**Symptom:** a workflow that should trigger does not. In the REST API the
+workflow entry keeps the file path as its name:
+
+```
+$ curl -s -H "Authorization: Bearer $TOKEN" \
+    https://api.github.com/repos/sunshijiang/haos-taishan/actions/workflows
+  {"id": 403627579, "name": ".github/workflows/build.yml", ...}
+```
+
+A workflow that GitHub parsed correctly shows its `name:` value instead
+(`"Build"`). A run created for a workflow that failed to parse has **zero
+jobs** and concludes as `failure` immediately.
+
+**Cause:** GitHub's workflow parser rejects the file. In this repository the
+cause was an **em dash** (`-`, U+2014) inside a `github-script` block:
+
+```yaml
+        with:
+          script: |
+            const body = `## HAOS Taishan build failed
+            ...
+               * The upstream tree changed ... - refresh them with ...
+            `;
+```
+
+Replacing the em dash with a plain hyphen made the file parse again, with
+nothing else changed.
+
+**Fix:** keep the workflow files ASCII only. The repository enforces this
+with `scripts/check-workflow-chars.py`, which runs as the first step of the
+Build workflow:
+
+```bash
+$ python3 scripts/check-workflow-chars.py
+All workflow files are ASCII only.
+```
+
+Common substitutions:
+
+| Character | Code | Replace with |
+|:-|:-|:-|
+| em dash | U+2014 | `-` |
+| en dash | U+2013 | `-` |
+| curly quotes | U+2018 / U+2019 | `'` |
+| curly double quotes | U+201C / U+201D | `"` |
+| ellipsis | U+2026 | `...` |
+| non-breaking space | U+00A0 | a space |
+
+**How to diagnose it yourself** when a workflow stops working:
+
+```bash
+TOKEN=$(printf "protocol=https\nhost=github.com\n" | git credential fill | grep password= | cut -d= -f2)
+
+# 1. Check whether GitHub parsed it: the name must not be the file path
+curl -s -H "Authorization: Bearer $TOKEN" \
+  https://api.github.com/repos/sunshijiang/haos-taishan/actions/workflows \
+  | python -c "import json,sys;[print(w['name'],w['path']) for w in json.load(sys.stdin)['workflows']]"
+
+# 2. Confirm it parses, by asking GitHub to run it on demand
+#    HTTP 204 means the workflow_dispatch trigger was found
+curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json" \
+  https://api.github.com/repos/sunshijiang/haos-taishan/actions/workflows/<id>/dispatches \
+  -d '{"ref":"main"}'
+```
+
+`scripts/bisect-workflow.py` automates step 2: it commits a candidate file
+through the API and reports whether GitHub could parse it.
+
+---
+
 ## Build problems
 
 ### `git apply` fails for the kernel patch
