@@ -33,17 +33,24 @@ jobs:
 
             const body = `## HAOS Taishan build failed
 
+            | | |
+            |:-|:-|
+            | Workflow | \`${run.name}\` |
+            | Branch | \`${run.head_branch}\` |
+            | Commit | \`${run.head_sha}\` |
+            | Run | ${run.html_url} |
+            | Concluded | ${run.conclusion} |
 
             ### What to do
 
             1. Open the run above and read the failing step.
             2. Common causes:
                * The upstream tree changed in a way that breaks the Taishan Pi
-                 patches — refresh them with \`scripts/sync-upstream.sh\`.
+                 patches - refresh them with \`scripts/sync-upstream.sh\`.
                * A new upstream kernel version moved the device tree or the
-                 U-Boot defconfig — re-check the hunk offsets in
+                 U-Boot defconfig - re-check the hunk offsets in
                  \`board/taishan/patches/\`.
-               * A new upstream Buildroot requirement — the builder container
+               * A new upstream Buildroot requirement - the builder container
                  image in \`upstream/Dockerfile\` changed.
             3. Re-run the failed job once the cause is fixed.
             `;
