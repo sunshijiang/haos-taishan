@@ -1,18 +1,17 @@
-name: Probe3
+name: Probe4
 on:
   workflow_dispatch:
 jobs:
   probe:
     runs-on: ubuntu-22.04
     steps:
-      - name: Table test
+      - name: Em dash test
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
         with:
           script: |
             const body = `## Failed
 
-            | | |
-            |:-|:-|
-            | Workflow | \`x\` |
+            1. Some text — with an em dash
+            2. More text
             `;
             core.info(body);
