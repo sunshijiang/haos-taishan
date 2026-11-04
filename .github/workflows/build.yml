@@ -71,7 +71,7 @@ jobs:
           sudo chown -R "$(stat -c '%U:%G' "${GITHUB_WORKSPACE}")" /mnt/cache /mnt/output
           df -h
 
-      - name: Restore cache: object files
+      - name: Restore cache object files
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /mnt/cache/cc
@@ -125,7 +125,7 @@ jobs:
             haos-taishan-builder:${{ github.sha }} \
             make BR2_JLEVEL=4
 
-      - name: Save cache: object files
+      - name: Save cache object files
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /mnt/cache/cc
