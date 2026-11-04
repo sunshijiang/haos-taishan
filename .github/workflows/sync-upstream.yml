@@ -121,23 +121,52 @@ jobs:
           # Fetch the new upstream tree and try to apply the Taishan Pi
           # patches on top of it. If this fails, the job fails and the
           # "notify" job raises an issue with the details.
-          git clone --depth 1 --branch dev \
-            https://github.com/home-assistant/operating-system.git /tmp/upstream
-          git -C /tmp/upstream checkout --force "${{ needs.check.outputs.latest_sha }}"
-
-          echo "Applying the Taishan Pi overlay onto the new upstream tree"
+          echo "Fetching upstream ${{ needs.check.outputs.latest_sha }}"
           ./scripts/sync-upstream.sh \
             --ref "${{ needs.check.outputs.latest_sha }}" \
             --dest /tmp/upstream-overlay
 
-          echo "Checking that the kernel patch still applies"
-          cd /tmp/upstream-overlay
-          git -C buildroot apply --check \
+          # The kernel is not part of the upstream tree: Buildroot downloads
+          # the kernel tarball at build time and applies BR2_GLOBAL_PATCH_DIR
+          # to it. So verify the kernel patch against the actual tarball
+          # that the defconfig pins.
+          #
+          # The HAOS kernel versions come from the stable tree, so the
+          # snapshot endpoint of git.kernel.org/stable is used rather than
+          # cdn.kernel.org (which only carries the released tarballs).
+          KVER="$(grep 'BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE' \
+            /tmp/upstream-overlay/buildroot-external/configs/taishan_defconfig \
+            | cut -d '"' -f 2)"
+          echo "Kernel version: ${KVER}"
+
+          echo "Downloading the kernel snapshot for linux-${KVER}"
+          curl -fsSL --retry 3 -o /tmp/linux.tar.gz \
+            "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/snapshot/linux-${KVER}.tar.gz"
+
+          rm -rf /tmp/linux-src && mkdir -p /tmp/linux-src
+          tar -xzf /tmp/linux.tar.gz -C /tmp/linux-src --strip-components=1
+
+          echo "Checking that the kernel patch applies to linux-${KVER}"
+          cd /tmp/linux-src
+          git apply --check \
             "${GITHUB_WORKSPACE}/board/taishan/patches/linux/0001-arm64-dts-rockchip-rk3566-lckfb-tspi-enable-eMMC-HS200.patch" \
             || {
-              echo "::error::The Taishan Pi kernel patch does not apply to the new upstream kernel."
+              echo "::error::The Taishan Pi kernel patch does not apply to linux-${KVER}."
               exit 1
             }
+          echo "Kernel patch applies cleanly."
+
+          echo "Checking that the U-Boot patch applies to U-Boot v2026.04"
+          git clone --depth 1 --branch v2026.04 \
+            https://github.com/u-boot/u-boot.git /tmp/uboot
+          cd /tmp/uboot
+          git apply --check \
+            "${GITHUB_WORKSPACE}/board/taishan/patches/uboot/0001-configs-lckfb-tspi-rk3566-enable-HAOS-required-options.patch" \
+            || {
+              echo "::error::The Taishan Pi U-Boot patch does not apply to U-Boot v2026.04."
+              exit 1
+            }
+          echo "U-Boot patch applies cleanly."
 
       - name: Create or update the pull request
         uses: peter-evans/create-pull-request@v7 # v7.0.9

@@ -26,6 +26,7 @@ on:
       - 'board/**'
       - 'configs/**'
       - 'scripts/**'
+      - 'upstream.pin'
       - '.github/workflows/build.yml'
   schedule:
     # Weekly rebuild, so the image tracks upstream even when nothing changed
@@ -43,6 +44,9 @@ jobs:
   build:
     name: Build HAOS for Taishan Pi
     runs-on: ubuntu-22.04
+    # A cold build compiles the whole toolchain from scratch and takes a few
+    # hours. Give it room, but fail loudly rather than being killed silently.
+    timeout-minutes: 300
     permissions:
       contents: read
 
@@ -62,9 +66,18 @@ jobs:
           df -h
           sudo rm -rf /usr/local/lib/android/sdk/ndk
           sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo rm -rf /usr/share/dotnet
           sudo mkdir -p /mnt/cache /mnt/output
           sudo chown -R "$(stat -c '%U:%G' "${GITHUB_WORKSPACE}")" /mnt/cache /mnt/output
           df -h
+
+      - name: Restore cache: object files
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-taishan-${{ github.run_id }}
+          restore-keys: |
+            haos-cc-taishan-
 
       - name: Fetch upstream and apply the Taishan Pi overlay
         run: |
@@ -94,6 +107,9 @@ jobs:
 
       - name: Build
         run: |
+          # BR2_JLEVEL controls the Buildroot parallelism. The default is a
+          # single job, which makes a full toolchain build take many hours.
+          # Four parallel jobs fit comfortably in a GitHub runner.
           docker run --rm --privileged \
             -e BUILDER_UID="$(id -u)" \
             -e BUILDER_GID="$(id -g)" \
@@ -101,7 +117,14 @@ jobs:
             -v "/mnt/cache:/cache" \
             -v "/mnt/output:/build/output" \
             haos-taishan-builder:${{ github.sha }} \
-            make
+            make BR2_JLEVEL=4
+
+      - name: Save cache: object files
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-taishan-${{ github.run_id }}
 
       - name: Verify the kernel configuration
         run: |
