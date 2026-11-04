@@ -21,31 +21,40 @@ A workflow that GitHub parsed correctly shows its `name:` value instead
 (`"Build"`). A run created for a workflow that failed to parse has **zero
 jobs** and concludes as `failure` immediately.
 
-**Cause:** GitHub's workflow parser rejects the file. In this repository the
-cause was an **em dash** (`-`, U+2014) inside a `github-script` block:
+**Cause:** GitHub's workflow parser rejected the file. Three separate
+constructs cause this, and all three are accepted by a plain YAML parser,
+which is why they are easy to miss:
+
+| Construct | Example | Why it breaks |
+|:-|:-|:-|
+| Non-ASCII characters | an em dash (U+2014) in a `github-script` body | the parser only accepts ASCII in the structural parts of the document |
+| A colon in a name value | `- name: Restore cache: object files` | the colon is read as a key separator, which makes the document ambiguous |
+| The secrets context in an `if` | `if: ${{ secrets.NTFY_TOPIC != '' }}` | secrets are not available in an `if` condition, so the expression cannot be evaluated |
+
+The third one is also a documentation problem: even if GitHub accepted it,
+the condition would never be true. The correct form exposes the secret
+through the job environment first:
 
 ```yaml
-        with:
-          script: |
-            const body = `## HAOS Taishan build failed
-            ...
-               * The upstream tree changed ... - refresh them with ...
-            `;
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+
+    steps:
+      - name: Send an out-of-band notification
+        if: env.NTFY_TOPIC != ''
+        run: |
+          curl -fsS ... "https://ntfy.sh/$NTFY_TOPIC"
 ```
 
-Replacing the em dash with a plain hyphen made the file parse again, with
-nothing else changed.
-
-**Fix:** keep the workflow files ASCII only. The repository enforces this
-with `scripts/check-workflow-chars.py`, which runs as the first step of the
-Build workflow:
+**Fix:** `scripts/check-workflow-chars.py` checks for all three and runs as
+the first step of the Build workflow:
 
 ```bash
 $ python3 scripts/check-workflow-chars.py
-All workflow files are ASCII only.
+All workflow files pass the GitHub compatibility checks.
 ```
 
-Common substitutions:
+Common character substitutions:
 
 | Character | Code | Replace with |
 |:-|:-|:-|
@@ -56,11 +65,16 @@ Common substitutions:
 | ellipsis | U+2026 | `...` |
 | non-breaking space | U+00A0 | a space |
 
-A second trap: a workflow that was committed through the GitHub REST API
-(the contents endpoint) keeps its entry but its name stays the file path.
-GitHub indexes workflows when the push event arrives, not when the blob
-changes. The same file committed with `git push` is parsed correctly.
-When diagnosing this, compare against a `git push` of the same content.
+### Commit the workflow files with git, not through the REST API
+
+A workflow that was written through the GitHub REST API (the contents
+endpoint) keeps its entry but its name stays the file path, even when the
+content is correct. GitHub indexes a workflow when the **push event**
+arrives, not when the blob changes. The same file committed with `git push`
+is parsed correctly.
+
+This matters when diagnosing the symptom above: a workflow committed
+through the API looks broken even when it is not.
 
 **How to diagnose it yourself** when a workflow stops working:
 
@@ -80,8 +94,11 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST \
   -d '{"ref":"main"}'
 ```
 
-`scripts/bisect-workflow.py` automates step 2: it commits a candidate file
-through the API and reports whether GitHub could parse it.
+To narrow a parse failure down to a single construct, bisect the file: put
+a candidate version on a fresh path in a scratch repository, commit it with
+`git push`, and check whether the name comes back as the `name:` value or as
+the file path. `scripts/bisect-workflow.py` does the same through the API,
+which is good enough to compare two candidates but not to test a new file.
 
 ---
 

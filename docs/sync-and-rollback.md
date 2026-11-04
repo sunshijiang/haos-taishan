@@ -116,6 +116,23 @@ The `notify` job runs and:
 
    Both are optional; without them the issue is still created.
 
+The notification steps read the secrets from the job environment rather than
+directly from the `secrets` context, because a secret cannot be used in an
+`if` condition:
+
+```yaml
+    env:
+      NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+    steps:
+      - name: Send an out-of-band notification
+        if: env.NTFY_TOPIC != ''
+        run: |
+          curl -fsS ... "https://ntfy.sh/$NTFY_TOPIC"
+```
+
 ### On a failed build
 
 `.github/workflows/alert-build-failure.yml` reacts to a completed `Build`
