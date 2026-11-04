@@ -1,13 +1,101 @@
-name: Probe2
+# Raise a visible alert when a build fails.
+#
+# The Build workflow only uploads artifacts on success, so a failure is easy
+# to miss in a long-running repository. This workflow turns a failed build
+# into a tracked GitHub issue plus an optional push notification.
+#
+name: Alert on build failure
+
 on:
+  workflow_run:
+    workflows:
+      - Build
+    types:
+      - completed
   workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
 jobs:
-  probe:
+  alert:
+    name: Open an issue for the failed build
+    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Test secrets expression
+      - name: Open or update the build failure issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+
+            const body = `## HAOS Taishan build failed
+
+            | | |
+            |:-|:-|
+            | Workflow | \`${run.name}\` |
+            | Branch | \`${run.head_branch}\` |
+            | Commit | \`${run.head_sha}\` |
+            | Run | ${run.html_url} |
+            | Concluded | ${run.conclusion} |
+
+            ### What to do
+
+            1. Open the run above and read the failing step.
+            2. Common causes:
+               * The upstream tree changed in a way that breaks the Taishan Pi
+                 patches — refresh them with \`scripts/sync-upstream.sh\`.
+               * A new upstream kernel version moved the device tree or the
+                 U-Boot defconfig — re-check the hunk offsets in
+                 \`board/taishan/patches/\`.
+               * A new upstream Buildroot requirement — the builder container
+                 image in \`upstream/Dockerfile\` changed.
+            3. Re-run the failed job once the cause is fixed.
+            `;
+
+            const title = 'HAOS Taishan build failed';
+
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'build-failure',
+            });
+
+            if (existing.data.length > 0) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.data[0].number,
+                body,
+              });
+              core.info(`Updated issue #${existing.data[0].number}`);
+            } else {
+              const issue = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ['build-failure'],
+              });
+              core.info(`Created issue #${issue.number}`);
+            }
+
+      - name: Send an out-of-band notification
         if: ${{ secrets.NTFY_TOPIC != '' }}
-        run: echo "non-empty"
-      - name: Test combined expression
+        run: |
+          curl -fsS -H "Title: HAOS Taishan build failed" \
+               -H "Priority: high" \
+               -H "Tags: warning" \
+               -d "Build failed: ${{ github.event.workflow_run.html_url }}" \
+               "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
+
+      - name: Send a Telegram notification
         if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' && secrets.TELEGRAM_CHAT_ID != '' }}
-        run: echo "both"
+        run: |
+          curl -fsS -X POST \
+               "https://api.telegram.org/bot${{ secrets.TELEGRAM_BOT_TOKEN }}/sendMessage" \
+               -d chat_id="${{ secrets.TELEGRAM_CHAT_ID }}" \
+               -d text="HAOS Taishan build failed: ${{ github.event.workflow_run.html_url }}"
