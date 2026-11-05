@@ -90,10 +90,12 @@ jobs:
 
       - name: Fetch upstream and apply the Taishan Pi overlay
         run: |
-          chmod +x scripts/*.sh
+          # Call the script through bash: a clone made on Windows does not
+          # carry the executable bit, so ./script.sh would fail with
+          # "Permission denied".
           PINNED="$(grep -oE '^[0-9a-f]{40}' upstream.pin | head -1)"
           echo "Pinned upstream: ${PINNED}"
-          ./scripts/sync-upstream.sh --ref "${PINNED}" --dest "${GITHUB_WORKSPACE}/upstream"
+          bash scripts/sync-upstream.sh --ref "${PINNED}" --dest "${GITHUB_WORKSPACE}/upstream"
 
       - name: Build the builder container image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
@@ -119,6 +121,13 @@ jobs:
           # BR2_JLEVEL controls the Buildroot parallelism. The default is a
           # single job, which makes a full toolchain build take many hours.
           # Four parallel jobs fit comfortably in a GitHub runner.
+          #
+          # The build output goes to a file instead of to the job log. A
+          # full build prints tens of thousands of lines, and that is
+          # enough to break the log stream: the job then keeps running
+          # without reporting anything, and the reason for a failure is
+          # lost. The log file lands in the output volume, so it can be
+          # downloaded as an artefact when something goes wrong.
           docker run --rm --privileged \
             -e BUILDER_UID="$(id -u)" \
             -e BUILDER_GID="$(id -g)" \
@@ -126,13 +135,26 @@ jobs:
             -v "/mnt/cache:/cache" \
             -v "/mnt/output:/build/output" \
             haos-taishan-builder:${{ github.sha }} \
-            make BR2_JLEVEL=4
+            bash -c 'make BR2_JLEVEL=4 > /build/output/build.log 2>&1; rc=$?; \
+                     echo "make exited with ${rc}"; \
+                     tail -n 100 /build/output/build.log; \
+                     exit ${rc}'
 
       - name: Save cache object files
+        if: always()
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /mnt/cache/cc
           key: haos-cc-taishan-${{ github.run_id }}
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          archive: false
+          name: build.log
+          path: /mnt/output/build.log
+          retention-days: 7
 
       - name: Verify the kernel configuration
         run: |

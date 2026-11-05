@@ -69,7 +69,10 @@ jobs:
         run: |
           chmod +x scripts/*.sh
           set -o pipefail
-          ./scripts/check-upstream.sh | tee /tmp/upstream-check.env
+          # Call the script through bash: a clone made on Windows does not
+          # carry the executable bit, so ./script.sh would fail with
+          # "Permission denied".
+          bash scripts/check-upstream.sh | tee /tmp/upstream-check.env
           {
             echo "update_available=$(grep '^UPSTREAM_UPDATE_AVAILABLE=' /tmp/upstream-check.env | cut -d= -f2)"
             echo "pinned_sha=$(grep '^UPSTREAM_PINNED_SHA=' /tmp/upstream-check.env | cut -d= -f2)"
@@ -126,7 +129,10 @@ jobs:
           # patches on top of it. If this fails, the job fails and the
           # "notify" job raises an issue with the details.
           echo "Fetching upstream ${{ needs.check.outputs.latest_sha }}"
-          ./scripts/sync-upstream.sh \
+          # Call the script through bash: a clone made on Windows does not
+          # carry the executable bit, so ./script.sh would fail with
+          # "Permission denied".
+          bash scripts/sync-upstream.sh \
             --ref "${{ needs.check.outputs.latest_sha }}" \
             --dest /tmp/upstream-overlay
 
@@ -239,12 +245,12 @@ jobs:
             2. If the Taishan Pi patches no longer apply, refresh them against
                the new upstream tree:
 
-               ```bash
+               \`\`\`bash
                ./scripts/sync-upstream.sh --ref <new-sha> --dest /tmp/up
                cd /tmp/up/buildroot
                git apply --check \
                  ${GITHUB_WORKSPACE}/board/taishan/patches/linux/*.patch
-               ```
+               \`\`\`
 
             3. Fix the patches, then run the workflow again.
             `;

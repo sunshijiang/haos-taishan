@@ -79,6 +79,77 @@ def check_secrets_in_if(path):
     return problems
 
 
+def check_script_backticks(path):
+    """A Markdown code fence breaks a github-script body.
+
+    The body of `actions/github-script` is JavaScript. A code fence written
+    as ``` inside a template literal terminates it early, and the step fails
+    with "SyntaxError: Unexpected identifier". Every backtick in the body
+    has to be escaped as \\`.
+
+    A single backtick is what opens and closes a template literal, so it is
+    fine on its own. A run of three or more is a code fence, and that is
+    what breaks the step.
+    """
+    problems = []
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+
+    inside = False
+    for number, line in enumerate(lines, 1):
+        if not inside:
+            if "script: |" in line:
+                inside = True
+            continue
+        # A block scalar ends at the first line that is not indented enough.
+        if line.strip() and not line.startswith("            "):
+            inside = False
+            continue
+
+        bare = line.replace("\\`", "")
+        if "`" * 3 in bare:
+            problems.append(
+                f"{path}:{number}: a code fence breaks the github-script "
+                f"body, escape the backticks as \\` ({line.strip()[:60]})"
+            )
+    return problems
+
+
+def check_script_calls(path):
+    """Do not run a shell script through ./script.sh.
+
+    Git does not record the executable bit on Windows, so a script committed
+    from Windows arrives without it and fails with "Permission denied".
+    Call it through bash instead.
+
+    Only the run steps count. A mention inside a github-script body is
+    documentation for a human, not something that gets executed.
+    """
+    problems = []
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+
+    inside_script = False
+    for number, line in enumerate(lines, 1):
+        stripped = line.strip()
+        if stripped.startswith("script: |"):
+            inside_script = True
+            continue
+        if inside_script:
+            if stripped and not line.startswith("            "):
+                inside_script = False
+            else:
+                continue
+        if stripped.startswith("#"):
+            continue
+        if stripped.startswith("./scripts/") or stripped.startswith("./script"):
+            problems.append(
+                f"{path}:{number}: run the script through bash, it has no "
+                f"executable bit ({stripped[:60]})"
+            )
+    return problems
+
+
 def main():
     failures = []
     for path in sorted(glob.glob(".github/workflows/*.yml") +
@@ -86,6 +157,8 @@ def main():
         failures.extend(check_non_ascii(path))
         failures.extend(check_colons(path))
         failures.extend(check_secrets_in_if(path))
+        failures.extend(check_script_backticks(path))
+        failures.extend(check_script_calls(path))
 
     if failures:
         print("Workflow files contain constructs that GitHub rejects:")
@@ -97,6 +170,8 @@ def main():
         print("  curly quotes              ->  ' or \"")
         print("  a colon in a name value   ->  drop it or quote the value")
         print("  secrets in an if          ->  set an env variable and test env.NAME")
+        print("  a backtick in a script    ->  escape it as \\`")
+        print("  ./script.sh               ->  bash script.sh")
         return 1
 
     print("All workflow files pass the GitHub compatibility checks.")
