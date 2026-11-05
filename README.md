@@ -93,7 +93,26 @@ image filename, the `os-release` variant and the RAUC `compatible` string
 
 ---
 
-## 3. Building
+## 3. One setting to turn on
+
+The sync workflow opens a pull request with the built in `GITHUB_TOKEN`.
+GitHub only allows that when this is on:
+
+**Settings -> Actions -> General -> Workflow permissions -> Allow GitHub
+Actions to create and approve pull requests**
+
+<https://github.com/sunshijiang/haos-taishan/settings/actions>
+
+There is no API for it, so it has to be set in the web interface. Without it
+the sync job fails with *"GitHub Actions is not permitted to create or
+approve pull requests"*, and the alert workflow opens an issue that says so.
+
+The alert workflow also sends a push notification when a secret is set, see
+[the rollback guide](docs/sync-and-rollback.md#alerting).
+
+---
+
+## 4. Building
 
 ### Prerequisites
 
@@ -146,7 +165,7 @@ GitHub release from the **Build** workflow (`workflow_dispatch` → *publish*).
 
 ---
 
-## 4. Flashing and updating
+## 5. Flashing and updating
 
 ### First install
 
@@ -185,7 +204,7 @@ attempts.
 
 ---
 
-## 5. Partition layout
+## 6. Partition layout
 
 The image uses the same layout as the official HAOS Green board
 (`PARTITION_TABLE_TYPE=hybrid`, i.e. GPT with an MBR hybrid header):
@@ -227,7 +246,7 @@ want to keep your existing setup.
 
 ---
 
-## 6. Keeping in sync with upstream
+## 7. Keeping in sync with upstream
 
 The **Sync upstream** workflow runs daily at 04:23 UTC:
 
@@ -302,7 +321,7 @@ rauc install /mnt/data/haos_taishan-<older-version>.raucb
 
 ---
 
-## 7. Documentation
+## 8. Documentation
 
 | Document | Contents |
 |:-|:-|
@@ -316,7 +335,7 @@ rauc install /mnt/data/haos_taishan-<older-version>.raucb
 
 ---
 
-## 8. Licence and attribution
+## 9. Licence and attribution
 
 The board customisation in this repository is distributed under the
 Apache-2.0 licence, matching upstream Home Assistant OS.
