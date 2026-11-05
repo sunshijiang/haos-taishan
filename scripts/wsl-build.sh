@@ -123,6 +123,26 @@ if [ "${NEW_PATH}" != "${PATH}" ]; then
     log "Cleaned the PATH, it had Windows entries with spaces in them"
 fi
 
+# A newer autoconf.
+#
+# Buildroot runs autoreconf for util-linux, and util-linux 2.40.4 ships a
+# configure that autoconf 2.72 generated. Regenerating it with the 2.71 of
+# Ubuntu 22.04 changes how PACKAGE_STRING is defined, and the build fails
+# with "PACKAGE_STRING undeclared".
+#
+# scripts/wsl-install-autoconf.sh puts 2.72 into ~/.local/bin, which has to
+# come first in the PATH.
+if [ -x "${HOME}/.local/bin/autoconf" ]; then
+    case ":${PATH}:" in
+        *":${HOME}/.local/bin:"*) : ;;
+        *)
+            PATH="${HOME}/.local/bin:${PATH}"
+            export PATH
+            log "Using autoconf $("${HOME}/.local/bin/autoconf" --version | head -1 | grep -oE '[0-9]+\.[0-9]+$')"
+            ;;
+    esac
+fi
+
 # ---------------------------------------------------------------------
 # 2c. The cache directory
 # ---------------------------------------------------------------------
@@ -203,6 +223,12 @@ fi
 # ---------------------------------------------------------------------
 cd "${UPSTREAM_DIR}"
 
+# Put the sources that the upstream sites no longer serve into the cache,
+# so the build does not wait for a download that will never finish.
+if [ -f "${WIN_ROOT}/scripts/wsl-prefetch.sh" ]; then
+    bash "${WIN_ROOT}/scripts/wsl-prefetch.sh" || true
+fi
+
 log "Generating the build configuration"
 make taishan_defconfig
 
@@ -211,10 +237,26 @@ make taishan_defconfig
 # ---------------------------------------------------------------------
 LOG="${BUILD_ROOT}/build.log"
 
-MAKE_ARGS=""
+# The mirror and the timeout.
+#
+# BR2_PRIMARY_SITE puts the Buildroot mirror in front of the list of
+# download locations, so a package is taken from there before the site of
+# the project itself is tried. That matters because some projects drop old
+# releases from their own site, and Buildroot's wget helper has no timeout
+# at all: the build waits forever on a connection that never delivers.
+#
+# BR2_WGET replaces the wget command, here with a timeout so that a stuck
+# mirror falls through to the next location instead of hanging the build.
+#
+# The arguments are kept in an array. A value with a space in it has to
+# stay one argument, otherwise make reads the second word as one of its
+# own options.
+MAKE_ARGS=()
 if [ "${JOBS}" != "0" ]; then
-    MAKE_ARGS="BR2_JLEVEL=${JOBS}"
+    MAKE_ARGS+=("BR2_JLEVEL=${JOBS}")
 fi
+MAKE_ARGS+=("BR2_PRIMARY_SITE=https://sources.buildroot.net")
+MAKE_ARGS+=("BR2_WGET=wget --connect-timeout=15 --timeout=60 --tries=2")
 
 log "Building the image, this takes a few hours"
 log "The output goes to ${LOG}, tail it with: tail -f ${LOG}"
@@ -223,10 +265,10 @@ set +e
 if [ -n "${KEEP_GOING}" ]; then
     # Buildroot stops at the first failing package. -k keeps going so that
     # a single broken package does not hide the state of the others.
-    make ${MAKE_ARGS} -k > "${LOG}" 2>&1
+    make "${MAKE_ARGS[@]}" -k > "${LOG}" 2>&1
     rc=$?
 else
-    make ${MAKE_ARGS} > "${LOG}" 2>&1
+    make "${MAKE_ARGS[@]}" > "${LOG}" 2>&1
     rc=$?
 fi
 set -e

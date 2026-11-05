@@ -325,6 +325,7 @@ rauc install /mnt/data/haos_taishan-<older-version>.raucb
 
 | Document | Contents |
 |:-|:-|
+| [docs/PROJECT.md](docs/PROJECT.md) | **Complete project reference: hardware, upstream facts, build, sync, troubleshooting** |
 | [docs/build-environment.md](docs/build-environment.md) | Build dependencies, disk/RAM requirements, local vs CI builds |
 | [docs/building-on-windows.md](docs/building-on-windows.md) | Building on Windows with WSL2, no Docker needed |
 | [docs/parameters.md](docs/parameters.md) | Every tunable in `meta`, `defconfig`, kernel and U-Boot config |
