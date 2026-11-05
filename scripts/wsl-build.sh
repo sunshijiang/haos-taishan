@@ -84,6 +84,58 @@ done
 [ "${missing}" -eq 0 ] || fail "Run 'bash scripts/wsl-setup.sh' first"
 
 # ---------------------------------------------------------------------
+# 2b. A usable PATH
+# ---------------------------------------------------------------------
+# WSL adds the Windows PATH to the Linux one. Those entries carry spaces
+# and backslashes, and Buildroot refuses to work with such a PATH:
+#
+#   Your PATH contains spaces, TABs, and/or newline (\n) characters.
+#
+# Keep the entries that look like plain Linux paths and drop the rest.
+clean_path() {
+    local old_ifs="${IFS}"
+    local entry
+    local -a kept=()
+    IFS=':'
+    for entry in ${PATH}; do
+        case "${entry}" in
+            ""|*\\*|*" "*|*"	"*) continue ;;
+            [A-Za-z]:*) continue ;;
+            *) kept+=("${entry}") ;;
+        esac
+    done
+    IFS="${old_ifs}"
+    local result=""
+    for entry in ${kept[@]+"${kept[@]}"}; do
+        if [ -n "${result}" ]; then
+            result="${result}:${entry}"
+        else
+            result="${entry}"
+        fi
+    done
+    printf '%s' "${result}"
+}
+
+NEW_PATH="$(clean_path)"
+if [ "${NEW_PATH}" != "${PATH}" ]; then
+    PATH="${NEW_PATH}"
+    export PATH
+    log "Cleaned the PATH, it had Windows entries with spaces in them"
+fi
+
+# ---------------------------------------------------------------------
+# 2c. The cache directory
+# ---------------------------------------------------------------------
+# The defconfig points the download and the compiler cache at /cache, which
+# is where the upstream builder container mounts them. Create the same
+# directory here so the configuration does not have to change.
+if [ ! -d /cache ] || [ ! -w /cache ]; then
+    fail "/cache is missing or not writable. Run 'bash scripts/wsl-run.sh' from
+       Windows, it prepares the directory."
+fi
+mkdir -p /cache/dl /cache/cc 2>/dev/null || true
+
+# ---------------------------------------------------------------------
 # 3. Prepare the upstream tree with the Taishan Pi overlay
 # ---------------------------------------------------------------------
 UPSTREAM_DIR="${BUILD_ROOT}/upstream"
