@@ -94,6 +94,22 @@ Review the build result before deploying to a device.
 
 ---
 
+### One repository setting has to be enabled
+
+The sync workflow opens a pull request with the built in `GITHUB_TOKEN`.
+GitHub only allows that when the repository setting
+**Settings -> Actions -> General -> Workflow permissions -> Allow GitHub
+Actions to create and approve pull requests** is on. Without it the job
+fails with:
+
+```
+GitHub Actions is not permitted to create or approve pull requests.
+```
+
+There is no API for this setting, it has to be turned on in the web
+interface. The notify job reports the failure, so it does not pass
+unnoticed.
+
 ## Alerting
 
 Failures are never silent.

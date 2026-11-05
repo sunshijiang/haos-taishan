@@ -249,7 +249,7 @@ jobs:
                ./scripts/sync-upstream.sh --ref <new-sha> --dest /tmp/up
                cd /tmp/up/buildroot
                git apply --check \
-                 ${GITHUB_WORKSPACE}/board/taishan/patches/linux/*.patch
+                 ./board/taishan/patches/linux/*.patch
                \`\`\`
 
             3. Fix the patches, then run the workflow again.
