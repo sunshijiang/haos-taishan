@@ -326,6 +326,7 @@ rauc install /mnt/data/haos_taishan-<older-version>.raucb
 | Document | Contents |
 |:-|:-|
 | [docs/build-environment.md](docs/build-environment.md) | Build dependencies, disk/RAM requirements, local vs CI builds |
+| [docs/building-on-windows.md](docs/building-on-windows.md) | Building on Windows with WSL2, no Docker needed |
 | [docs/parameters.md](docs/parameters.md) | Every tunable in `meta`, `defconfig`, kernel and U-Boot config |
 | [docs/hardware-notes.md](docs/hardware-notes.md) | Board-specific adaptations and why each one is needed |
 | [docs/sync-and-rollback.md](docs/sync-and-rollback.md) | Upstream sync mechanics, alerting, rollback procedures |
