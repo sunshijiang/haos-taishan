@@ -10,4 +10,4 @@
 # after a successful local build, then verify with:
 #   scripts/check-upstream.sh
 #
-7093f8afc25d5d110729c8e297c357087c063fb3 2026-10-30 upstream-dev
+c7acf719b948b192ee11dd296f0cdb331e33f0c0 2026-11-07 upstream-dev
